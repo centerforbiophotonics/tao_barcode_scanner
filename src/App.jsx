@@ -25,6 +25,7 @@ class App extends Component {
     this.handleLock = this.handleLock.bind(this);
     this.handlePasswordKeyDown = this.handlePasswordKeyDown.bind(this);
     this.handleScanActionChange = this.handleScanActionChange.bind(this);
+    this.checkedInNames = this.checkedInNames.bind(this);
 
     this.state = {
       workshops: [],
@@ -36,7 +37,9 @@ class App extends Component {
       tamper_lock: false,
       unlocking: false,
       password: "",
-      error: null
+      error: null,
+      current_message:"",
+      current_message_color: "green"
     }
 
     this.scan_timeout = null;
@@ -62,9 +65,21 @@ class App extends Component {
         .then(
           (result) => {
             this.setState(prevState => {
+
               prevState.attendees[workshop_id].push(attendee_id);
+
+              let checked_in_names = prevState.workshops
+                .find(w => {return w.id === prevState.selected_workshop}).registrants
+                .filter(r => {return prevState.attendees[prevState.selected_workshop].includes(r.id)})
+                .map(r => r.name);
+
+              let last_checked_in = checked_in_names[checked_in_names.length-1]
+
+              
               prevState.current_scan_val = "";
               prevState.error = null;
+              prevState.current_message = "Welcome "+last_checked_in;
+              prevState.current_message_color = "green";
               return prevState;
             });
           },
@@ -74,7 +89,6 @@ class App extends Component {
             });
           }
         )
-
   }
 
   loadWorkshops(handler){
@@ -94,7 +108,6 @@ class App extends Component {
             });
           }
         )
-
   }
 
   checkScan(){
@@ -111,8 +124,13 @@ class App extends Component {
         if (workshop_registrants.includes(attendee_id)){
           this.postAttend(this.state.selected_workshop, attendee_id);  
         } else {
-          alert("You aren't registered for this workshop.")
-          this.setState({current_scan_val: ""});
+          this.setState(
+            {
+              current_scan_val: "", 
+              current_message:"You aren't registered for this workshop.", 
+              current_message_color:"red"
+            }
+          );
         }
       });
     }
@@ -141,7 +159,6 @@ class App extends Component {
       } else {
         alert("You must select a workshop.")
       }
-
     }
   } 
 
@@ -154,10 +171,8 @@ class App extends Component {
         this.setState({password: "", unlocking:false})
         document.addEventListener("keydown", this.handleScan, false);
       }
-      
     } else {
       this.setState({password: e.target.value});
-
     }
   } 
 
@@ -166,6 +181,13 @@ class App extends Component {
       prevState.check_in = !prevState.check_in;
       return prevState;
     });
+  }
+
+  checkedInNames(){
+    return this.state.workshops
+      .find(w => {return w.id === this.state.selected_workshop}).registrants
+      .filter(r => {return this.state.attendees[this.state.selected_workshop].includes(r.id)})
+      .map(r => r.name)
   }
 
   render() {
@@ -200,10 +222,7 @@ class App extends Component {
         "None";
 
       let selected_workshop_checked_in = this.state.selected_workshop != null ?
-        this.state.workshops
-          .find(w => {return w.id === this.state.selected_workshop}).registrants
-          .filter(r => {return this.state.attendees[this.state.selected_workshop].includes(r.id)})
-          .map(r => r.name)
+        this.checkedInNames()
         :
         null
 
@@ -236,7 +255,6 @@ class App extends Component {
                       : 
                       <FontAwesomeIcon icon="lock"/>
                     }
-                    
                   </Button>
 
                   {this.state.tamper_lock === false ? 
@@ -253,9 +271,17 @@ class App extends Component {
                 </Col>
               </Row>
 
-              <h2>Attendance List:</h2>
-              <p>{selected_workshop_checked_in}</p>
-
+              {this.state.tamper_lock ?
+                <div>
+                  <h2 style={{color:this.state.current_message_color}}>{this.state.current_message}</h2>
+                </div>
+                :
+                <div>
+                  <h2>Attendance List:</h2>
+                  <p>{selected_workshop_checked_in}</p>
+                </div>
+              }
+             
             </Col>
             <Col md={2}>
               {this.state.error !== null ?
@@ -275,6 +301,7 @@ class App extends Component {
     
   }
 
+  ///selected_workshop_checked_in[selected_workshop_checked_in.length-1]
   componentDidMount(){
     if (!this.state.data_loaded){
       this.loadWorkshops()
