@@ -7,10 +7,11 @@ import 'react-select/dist/react-select.css';
 import { FormControl, Grid, Row, Col, Button } from 'react-bootstrap';
 
 import { library } from '@fortawesome/fontawesome-svg-core'
-import {faLock, faLockOpen, faSignInAlt, faSignOutAlt, faWifi} from '@fortawesome/free-solid-svg-icons'
+import {faLock, faLockOpen, faSignInAlt, faSignOutAlt, faWifi, faSave} from '@fortawesome/free-solid-svg-icons'
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
+import FileSaver from 'file-saver'
 
-library.add( faLock, faLockOpen, faSignInAlt, faSignOutAlt, faWifi )
+library.add( faLock, faLockOpen, faSignInAlt, faSignOutAlt, faWifi, faSave)
 
 
 class App extends Component {
@@ -26,13 +27,18 @@ class App extends Component {
     this.handlePasswordKeyDown = this.handlePasswordKeyDown.bind(this);
     this.handleScanActionChange = this.handleScanActionChange.bind(this);
     this.checkedInNames = this.checkedInNames.bind(this);
+    this.updateAttendance = this.updateAttendance.bind(this);
+    this.findAttendee = this.findAttendee.bind(this);
+    this.sync = this.sync.bind(this);
+    this.downloadCSV = this.downloadCSV.bind(this);
+    this.cache = this.cache.bind(this);
 
     this.state = {
       workshops: [],
       data_loaded: false,
       selected_workshop: null,
-      attendees: {},
-      check_in: true,
+      attendance: {},
+      check_in: false, //mode
       current_scan_val: "",
       tamper_lock: false,
       unlocking: false,
@@ -46,16 +52,15 @@ class App extends Component {
   }
 
   handleWorkshopChange(e){
-    this.setState(prevState => {
-      prevState.selected_workshop = e.value;
-
-      if (!(e.value in prevState.attendees)){
-        prevState.attendees[e.value] = [];
-      }
-
-      return prevState;
-    });
+    if (e !== null) {
+      this.setState(prevState => {
+        prevState.selected_workshop = e.value;
+        return prevState;
+      });
+    }
   }
+
+
 
   postAttend(workshop_id, attendee_id){
     fetch("http://localhost:3001/tao/attend", {
@@ -65,20 +70,10 @@ class App extends Component {
         .then(
           (result) => {
             this.setState(prevState => {
-
-              prevState.attendees[workshop_id].push(attendee_id);
-
-              let checked_in_names = prevState.workshops
-                .find(w => {return w.id === prevState.selected_workshop}).registrants
-                .filter(r => {return prevState.attendees[prevState.selected_workshop].includes(r.id)})
-                .map(r => r.name);
-
-              let last_checked_in = checked_in_names[checked_in_names.length-1]
-
-              
+              let name = prevState.workshops.find(w => {return w.id == workshop_id}).registrants.find(r => {return r.id == attendee_id})["name"]
               prevState.current_scan_val = "";
               prevState.error = null;
-              prevState.current_message = "Welcome "+last_checked_in;
+              prevState.current_message = "Thanks for coming "+name;
               prevState.current_message_color = "green";
               return prevState;
             });
@@ -100,7 +95,7 @@ class App extends Component {
               data_loaded: true,
               workshops: result,
               error: null
-            }, handler);
+            }, () => {handler(result)});
           },
           (error) => {
             this.setState({
@@ -110,28 +105,74 @@ class App extends Component {
         )
   }
 
+  updateAttendance(workshops, handler) {
+    workshops.forEach(w => {
+      w.registrants.forEach(r => {
+        let key = w.id + "-" + r.id;
+        if (key in this.state.attendance) {
+          if (r.attended) {
+            this.setState(prevState => {
+              prevState.attendance[key].checked_in = true;
+              prevState.attendance[key].checked_out = true;
+              return prevState
+            }, handler);
+          }
+          else {
+            if (handler) {
+              handler();
+            }
+          }
+        }
+        else {
+          this.setState(prevState => {
+            prevState.attendance[key] = {
+              checked_in : true,
+              checked_out : r.attended
+            };
+            return prevState
+          }, handler);
+        }
+      })
+    }) 
+  }
+
   checkScan(){
     let workshop_registrants = this.state.workshops.find(w => {return w.id === this.state.selected_workshop }).registrants.map((r) => { return r.id});
     let attendee_id = parseInt(this.state.current_scan_val, 10);
     if (workshop_registrants.includes(attendee_id)){
-      this.postAttend(this.state.selected_workshop, attendee_id);  
+      let key = this.state.selected_workshop + "-" + attendee_id;
+      this.setState(prevState => {   
+        if (prevState.check_in) {
+          prevState.attendance[key].checked_in = true;
+        }
+        else {
+          prevState.attendance[key].checked_out = true;
+        }
+        prevState.current_scan_val = "";
+        return prevState;
+      }, () => {
+        if (this.state.attendance[key].checked_out == true && this.state.attendance[key].checked_in == true) {
+          this.postAttend(this.state.selected_workshop, attendee_id); 
+        }
+      });
     } else {
       // Refresh workshop data in case attendee was just registered
-      this.loadWorkshops(() => {
-        let workshop_registrants = this.state.workshops.find(w => {return w.id === this.state.selected_workshop }).registrants.map((r) => { return r.id});
-        let attendee_id = parseInt(this.state.current_scan_val, 10);
-
-        if (workshop_registrants.includes(attendee_id)){
-          this.postAttend(this.state.selected_workshop, attendee_id);  
-        } else {
-          this.setState(
-            {
-              current_scan_val: "", 
-              current_message:"You aren't registered for this workshop.", 
-              current_message_color:"red"
-            }
-          );
-        }
+      this.loadWorkshops(workshops => {
+        this.updateAttendance(workshops, () => {
+          let workshop_registrants = this.state.workshops.find(w => {return w.id === this.state.selected_workshop }).registrants.map((r) => { return r.id});
+          let attendee_id = parseInt(this.state.current_scan_val, 10);
+          if (workshop_registrants.includes(attendee_id)){
+            this.postAttend(this.state.selected_workshop, attendee_id);  
+          } else {
+            this.setState(
+              {
+                current_scan_val: "", 
+                current_message:"You aren't registered for this workshop.", 
+                current_message_color:"red"
+              }
+            );
+         }
+       });
       });
     }
   }
@@ -184,10 +225,63 @@ class App extends Component {
   }
 
   checkedInNames(){
-    return this.state.workshops
-      .find(w => {return w.id === this.state.selected_workshop}).registrants
-      .filter(r => {return this.state.attendees[this.state.selected_workshop].includes(r.id)})
-      .map(r => r.name)
+    if (this.state.selected_workshop == null) {
+      return []
+    }
+    else {
+      var names = [];
+      for (let key in this.state.attendance) {
+        if (key.split("-")[0] == this.state.selected_workshop 
+          && this.state.attendance[key].checked_out == true 
+          && this.state.attendance[key].checked_in == true) {
+            names.push(this.findAttendee(key.split("-")[0], key.split("-")[1]).name);
+        }
+      }
+      return names;
+    }
+  }
+
+  findAttendee(workshop_id, attendee_id) {
+    return this.state.workshops.find(w => {return w.id == workshop_id}).registrants.find((r) => { return r.id == attendee_id});
+  }
+
+  sync() {
+    this.state.workshops.forEach(w => {w.registrants.forEach((r) => {
+      let attendance_record = this.state.attendance[w.id + "-" + r.id]
+      if (r.attended == false && attendance_record.checked_in && attendance_record.checked_out) {
+        this.postAttend(w.id, r.id);
+        }
+      })
+    })
+  }
+
+  downloadCSV() { //https://stackoverflow.com/questions/14964035/how-to-export-javascript-array-info-to-csv-on-client-side
+    //let rows = [["hello", "random", "book"], ["javascript", "type", "sublime"]];
+    let rows = [];
+    let i = 0;
+    rows[i++] = ["Workshop ID", "Attendee ID", "Attended"];
+    this.state.workshops.forEach(w => {
+      w.registrants.forEach((r) => {
+        let attendance_record = this.state.attendance[w.id + "-" + r.id];
+        rows[i] = [];
+        rows[i].push(w.id);
+        rows[i].push(r.id);
+        rows[i].push(attendance_record.checked_out);
+        i++;
+      })
+    })
+    
+    let csvContent = "data:text/csv;charset=utf-8,";
+    rows.forEach(function(rowArray){
+      let row = rowArray.join(",");
+      csvContent += row + "\r\n";
+    }); 
+    var encodedUri = encodeURI(csvContent);
+    window.open(encodedUri);
+  }
+
+  cache() {
+    localStorage.setItem('check_out_cache', JSON.stringify(this.state.attendance));
   }
 
   render() {
@@ -221,11 +315,7 @@ class App extends Component {
         :
         "None";
 
-      let selected_workshop_checked_in = this.state.selected_workshop != null ?
-        this.checkedInNames()
-        :
-        null
-
+      var storage = JSON.parse(localStorage.getItem('check_out_cache'));
 
       return (
         <Grid>
@@ -234,7 +324,7 @@ class App extends Component {
               <h1> TAO Workshop Attendance Scanner </h1>
               
               <Row style={{marginBottom:"5px"}}>
-                <Col md={9}>
+                <Col md={11}>
                   {this.state.tamper_lock === false ? 
                     <Select 
                       className="workshops"
@@ -242,13 +332,14 @@ class App extends Component {
                       options={workshop_select_options} 
                       value={this.state.selected_workshop}
                       onChange={this.handleWorkshopChange}
+                      clearable = {false}
                     />
                     :
                     <h3 style={{marginTop:"5px"}}>{this.state.check_in ? "Checking in to" : "Checking out of"} {selected_workshop_name} </h3>
                   }
                 </Col>
 
-                <Col md={3}>
+                <Col md={1}>
                   <Button bsSize="large" style={{color:"black", float:"right"}} onClick={this.handleLock}>
                     {this.state.tamper_lock ? 
                       <FontAwesomeIcon icon="lock-open"/>
@@ -257,14 +348,8 @@ class App extends Component {
                     }
                   </Button>
 
-                  {this.state.tamper_lock === false ? 
-                    <Button bsSize="large" style={{color:"black", float:"right", marginRight:"5px"}} onClick={this.handleScanActionChange}>
-                      {this.state.check_in ? 
-                        <FontAwesomeIcon icon="sign-in-alt"/>
-                        : 
-                        <FontAwesomeIcon icon="sign-out-alt"/>
-                      }
-                    </Button>
+                  {this.state.tamper_lock === false ?
+                    null
                     :
                     null
                   }
@@ -273,23 +358,48 @@ class App extends Component {
 
               {this.state.tamper_lock ?
                 <div>
-                  <h2 style={{color:this.state.current_message_color}}>{this.state.current_message}</h2>
+                <h2 style={{color:this.state.current_message_color}}>{this.state.current_message}</h2>
                 </div>
                 :
                 <div>
+                <div>
                   <h2>Attendance List:</h2>
-                  <p>{selected_workshop_checked_in}</p>
+                  <p>{this.checkedInNames()}</p>
                 </div>
+              </div>
+
               }
              
             </Col>
             <Col md={2}>
+            <div>
               {this.state.error !== null ?
+                <Button bsSize="medium" onClick={this.sync} disabled>
                 <FontAwesomeIcon icon="wifi" style={{color:"red"}} />
+                </Button>
                 :
                 null
               }
+              {this.state.tamper_lock ?
+                <Button bsSize="medium"  onClick={this.downloadCSV} disabled>
+                        {this.state.error == null ? 
+                        <FontAwesomeIcon icon="save"/>
+                        : 
+                        <FontAwesomeIcon icon="save" style={{color:"red"}}/>
+                        }
+                </Button>
+                :
+                <Button bsSize="medium"  onClick={this.downloadCSV}>
+                        {this.state.error == null ? 
+                        <FontAwesomeIcon icon="save"/>
+                        : 
+                        <FontAwesomeIcon icon="save" style={{color:"red"}}/>
+                        }
+                </Button>
+              }
+              </div>
             </Col>
+
           </Row>
         </Grid>
       );
@@ -303,10 +413,20 @@ class App extends Component {
 
   ///selected_workshop_checked_in[selected_workshop_checked_in.length-1]
   componentDidMount(){
-    if (!this.state.data_loaded){
-      this.loadWorkshops()
+    let cache_data = JSON.parse(localStorage.getItem("check_out_cache"));
+    if (cache_data != null) {
+      this.setState({attendance:cache_data}, () => {this.loadWorkshops(this.updateAttendance)});
+    }
+    else {
+      this.loadWorkshops(this.updateAttendance)
     }
   }
+
+  shouldComponentUpdate(nextProps, nextState) {
+    this.cache();
+    return true;
+  }
+
 }
 
 export default App;
