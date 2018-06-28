@@ -9,7 +9,6 @@ import { FormControl, Grid, Row, Col, Button } from 'react-bootstrap';
 import { library } from '@fortawesome/fontawesome-svg-core'
 import {faLock, faLockOpen, faSignInAlt, faSignOutAlt, faWifi, faSave} from '@fortawesome/free-solid-svg-icons'
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
-import FileSaver from 'file-saver'
 
 library.add( faLock, faLockOpen, faSignInAlt, faSignOutAlt, faWifi, faSave)
 
@@ -380,23 +379,13 @@ class App extends Component {
                 :
                 null
               }
-              {this.state.tamper_lock ?
-                <Button bsSize="medium"  onClick={this.downloadCSV} disabled>
-                        {this.state.error == null ? 
-                        <FontAwesomeIcon icon="save"/>
-                        : 
-                        <FontAwesomeIcon icon="save" style={{color:"red"}}/>
-                        }
+                <Button bsSize="medium"  onClick={this.downloadCSV} disabled={this.state.tamper_lock ? true : false}>
+                  {this.state.error == null ? 
+                  <FontAwesomeIcon icon="save"/>
+                  : 
+                  <FontAwesomeIcon icon="save" style={{color:"red"}}/>
+                  }
                 </Button>
-                :
-                <Button bsSize="medium"  onClick={this.downloadCSV}>
-                        {this.state.error == null ? 
-                        <FontAwesomeIcon icon="save"/>
-                        : 
-                        <FontAwesomeIcon icon="save" style={{color:"red"}}/>
-                        }
-                </Button>
-              }
               </div>
             </Col>
 
